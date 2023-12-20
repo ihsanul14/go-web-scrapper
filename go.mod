@@ -3,6 +3,7 @@ module go-web-scrapper
 go 1.19
 
 require (
+	github.com/chromedp/cdproto v0.0.0-20231011050154-1d073bb38998
 	github.com/chromedp/chromedp v0.9.3
 	github.com/google/uuid v1.5.0
 	github.com/sirupsen/logrus v1.9.3
@@ -12,7 +13,6 @@ require (
 )
 
 require (
-	github.com/chromedp/cdproto v0.0.0-20231011050154-1d073bb38998 // indirect
 	github.com/chromedp/sysutil v1.0.0 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
