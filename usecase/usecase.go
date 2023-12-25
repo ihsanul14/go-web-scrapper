@@ -44,76 +44,64 @@ func (u *Usecase) Get() {
 	// }
 
 	var products []Product
-	// initialize a Chrome browser instance on port 4444
 	service, err := selenium.NewChromeDriverService(os.Getenv("CHROME_PATH"), 4444)
 	if err != nil {
 		log.Fatal("Error:", err)
 	}
 
 	defer service.Stop()
-	// configure the browser options
+
 	caps := selenium.Capabilities{}
 	caps.AddChrome(chrome.Capabilities{Args: []string{
-		"--headless=new", // comment out this line for testing
 		fmt.Sprintf("--user-agent=%s", userAgent),
-		// "--window-size=840,480",
 	}})
 
-	// create a new remote client with the specified options
 	driver, err := selenium.NewRemote(caps, "")
 	if err != nil {
 		log.Fatal("Error:", err)
 	}
 
-	// visit the target page
 	err = driver.Get(URL)
 	if err != nil {
 		log.Fatal("Error:", err)
 	}
 
-	// perform the scrolling interaction
 	scrollingScript := `
 	// scroll down the page 10 times
 	const scrolls = 10
 	let scrollCount = 0
 	
-	// scroll down and then wait for 0.5s
+	// scroll down and then wait for 5s
 	const scrollInterval = setInterval(() => {
 	window.scrollTo(0, document.body.scrollHeight)
 	scrollCount++
 	if (scrollCount === scrolls) {
 	clearInterval(scrollInterval)
 	}
-	}, 500)
+	}, 5000)
 	`
 	_, err = driver.ExecuteScript(scrollingScript, []interface{}{})
 	if err != nil {
 		log.Fatal("Error:", err)
 	}
 
-	// wait up to 10 seconds for the 60th product to be on the page
 	err = driver.WaitWithTimeout(func(driver selenium.WebDriver) (bool, error) {
-		lastProduct, _ := driver.FindElement(selenium.ByCSSSelector, ".css-1asz3by")
+		lastProduct, _ := driver.FindElement(selenium.ByCSSSelector, ".css-10kdh43:nth-child(6)")
 		if lastProduct != nil {
 			return lastProduct.IsDisplayed()
 		}
 		return false, nil
-	}, 2*time.Minute)
+	}, 30*time.Second)
 	if err != nil {
 		log.Fatal("Error:", err)
 	}
 
-	// select the product elements
 	productElements, err := driver.FindElements(selenium.ByCSSSelector, ".pcv3__info-content")
 	if err != nil {
 		log.Fatal("Error:", err)
 	}
 
-	// iterate over the product elements
-	// and extract data from them
 	for _, productElement := range productElements {
-		// select the name and price nodes
-
 		linkElementDetail, err := productElement.GetAttribute("href")
 		if err != nil {
 			log.Fatal("Error:", err)
