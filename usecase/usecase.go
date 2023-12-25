@@ -1,7 +1,6 @@
 package usecase
 
 import (
-	"context"
 	"encoding/csv"
 	"fmt"
 	"go-web-scrapper/entity"
@@ -12,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chromedp/cdproto/cdp"
-	"github.com/chromedp/chromedp"
 	"github.com/google/uuid"
+	"github.com/tebeka/selenium"
+	"github.com/tebeka/selenium/chrome"
 )
 
 const URL = "https://www.tokopedia.com/discovery/productlist-clp_handphone-tablet_65-120"
@@ -23,6 +22,10 @@ const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_5) AppleWebKit/5
 type Usecase struct {
 	Entity entity.IEntity
 	Logger *logger.Log
+}
+
+type Product struct {
+	name, price, link string
 }
 type IUsecase interface {
 	Get()
@@ -34,100 +37,190 @@ func NewUsecase(entity entity.IEntity, logger *logger.Log) IUsecase {
 }
 
 func (u *Usecase) Get() {
-	var data []*model.Data
 	var wg sync.WaitGroup
-	numGoroutines := 1
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.ExecPath(os.Getenv("CHROME_PATH")),
-		chromedp.UserAgent(userAgent),
-		chromedp.WindowSize(1920, 1080),
-		chromedp.NoFirstRun,
-		chromedp.NoDefaultBrowserCheck,
-		chromedp.Headless,
-		chromedp.DisableGPU)
-	actx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer cancel()
-	ctx, cancel := chromedp.NewContext(actx)
-	defer cancel()
-
-	var productNodes []*cdp.Node
-	scrollingScript := `
-        //    const scrolls = 10
-        //    let scrollCount = 0
-           
-        //    const scrollInterval = setInterval(() => {
-        //      window.scrollTo(0, document.body.scrollHeight)
-        //      scrollCount++
-           
-        //      if (scrollCount === numScrolls) {
-        //       clearInterval(scrollInterval)
-        //      }
-        //    }, 500)
-
-		async function scrollAndClick() {
-			const productNodes = document.querySelectorAll('.pcv3__info-content');
-			for (const node of productNodes) {
-				node.click();
-				await new Promise(resolve => setTimeout(resolve, 1000));
-			}
-		}
-	
-		scrollAndClick();
-        `
-	err := chromedp.Run(ctx,
-		chromedp.Navigate(URL),
-		// chromedp.Navigate("https://scrapingclub.com/exercise/list_infinite_scroll/"),
-		chromedp.Evaluate(scrollingScript, nil),
-		chromedp.Sleep(2*time.Minute),
-		chromedp.Nodes(".css-6bc98m", &productNodes, chromedp.ByQueryAll))
-	// chromedp.Nodes(".post", &productNodes, chromedp.ByQueryAll))
-	if err != nil {
-		u.Logger.Logger.Error(err)
-	}
-
-	if err != nil {
-		log.Fatal("Error while performing the automation logic:", err)
-	}
-
-	fmt.Println("total_data: ", len(productNodes))
-
-	for i := 0; i < len(productNodes); i += numGoroutines {
-		for j := 0; j < numGoroutines; j++ {
-			wg.Add(1)
-			go func(ctx context.Context, a int, b int) {
-				defer wg.Done()
-				var name, description, imageLink, price, ratings, merchant string
-				err = chromedp.Run(ctx,
-					// chromedp.Text("h4", &name, chromedp.ByQuery, chromedp.FromNode(productNodes[a+b])),
-					chromedp.Text(".prd_link-product-name", &name, chromedp.ByQuery, chromedp.FromNode(productNodes[a+b])),
-					// chromedp.Text(".prd_link-product-name", &description, chromedp.ByQuery, chromedp.FromNode(node)),
-					// chromedp.Text(".prd_label-product-price", &price, chromedp.ByQuery, chromedp.FromNode(node)),
-					// chromedp.Text(".prd_rating-average-text", &ratings, chromedp.ByQuery, chromedp.FromNode(node)),
-					// chromedp.Text(".prd_link-product-name", &merchant, chromedp.ByQuery, chromedp.FromNode(node)),
-				)
-
-				if err != nil {
-					log.Fatal("Error:", err)
-				}
-
-				d := &model.Data{
-					Id:          uuid.New().String(),
-					Name:        name,
-					Description: description,
-					ImageLink:   imageLink,
-					Price:       price,
-					Ratings:     ratings,
-					MerchatName: merchant,
-				}
-				data = append(data, d)
-			}(ctx, i, j)
-		}
-	}
-	wg.Wait()
+	var data []*model.Data
 	// if err := u.Entity.Insert(ctx, data); err != nil {
 	// 	u.Logger.Logger.Error(err)
 	// }
 
+	var products []Product
+	// initialize a Chrome browser instance on port 4444
+	service, err := selenium.NewChromeDriverService(os.Getenv("CHROME_PATH"), 4444)
+	if err != nil {
+		log.Fatal("Error:", err)
+	}
+
+	defer service.Stop()
+	// configure the browser options
+	caps := selenium.Capabilities{}
+	caps.AddChrome(chrome.Capabilities{Args: []string{
+		"--headless=new", // comment out this line for testing
+		fmt.Sprintf("--user-agent=%s", userAgent),
+		// "--window-size=840,480",
+	}})
+
+	// create a new remote client with the specified options
+	driver, err := selenium.NewRemote(caps, "")
+	if err != nil {
+		log.Fatal("Error:", err)
+	}
+
+	// visit the target page
+	err = driver.Get(URL)
+	if err != nil {
+		log.Fatal("Error:", err)
+	}
+
+	// perform the scrolling interaction
+	scrollingScript := `
+	// scroll down the page 10 times
+	const scrolls = 10
+	let scrollCount = 0
+	
+	// scroll down and then wait for 0.5s
+	const scrollInterval = setInterval(() => {
+	window.scrollTo(0, document.body.scrollHeight)
+	scrollCount++
+	if (scrollCount === scrolls) {
+	clearInterval(scrollInterval)
+	}
+	}, 500)
+	`
+	_, err = driver.ExecuteScript(scrollingScript, []interface{}{})
+	if err != nil {
+		log.Fatal("Error:", err)
+	}
+
+	// wait up to 10 seconds for the 60th product to be on the page
+	err = driver.WaitWithTimeout(func(driver selenium.WebDriver) (bool, error) {
+		lastProduct, _ := driver.FindElement(selenium.ByCSSSelector, ".css-1asz3by")
+		if lastProduct != nil {
+			return lastProduct.IsDisplayed()
+		}
+		return false, nil
+	}, 2*time.Minute)
+	if err != nil {
+		log.Fatal("Error:", err)
+	}
+
+	// select the product elements
+	productElements, err := driver.FindElements(selenium.ByCSSSelector, ".pcv3__info-content")
+	if err != nil {
+		log.Fatal("Error:", err)
+	}
+
+	// iterate over the product elements
+	// and extract data from them
+	for _, productElement := range productElements {
+		// select the name and price nodes
+
+		linkElementDetail, err := productElement.GetAttribute("href")
+		if err != nil {
+			log.Fatal("Error:", err)
+		}
+
+		product := Product{}
+		product.link = linkElementDetail
+		products = append(products, product)
+	}
+
+	fmt.Printf("total data %d \n", len(productElements))
+	for _, v := range products {
+		wg.Add(1)
+		go func(v Product) {
+			defer wg.Done()
+			fmt.Println(v.link)
+
+			err = driver.Get(v.link)
+			if err != nil {
+				log.Println("Error:", err)
+			}
+
+			err = driver.WaitWithTimeout(func(driver selenium.WebDriver) (bool, error) {
+				lastProduct, _ := driver.FindElement(selenium.ByCSSSelector, ".css-1os9jjn")
+				if lastProduct != nil {
+					return lastProduct.IsDisplayed()
+				}
+				return false, nil
+			}, 2*time.Minute)
+			if err != nil {
+				log.Fatal("Error:", err)
+			}
+
+			nameElement, err := driver.FindElement(selenium.ByCSSSelector, ".css-1os9jjn")
+			if err != nil {
+				log.Println("Error:", err)
+			}
+
+			priceElement, err := driver.FindElement(selenium.ByCSSSelector, ".price")
+			if err != nil {
+				log.Println("Error:", err)
+			}
+
+			descriptionElement, err := driver.FindElement(selenium.ByCSSSelector, ".css-16inwn4")
+			if err != nil {
+				log.Println("Error:", err)
+			}
+
+			imageLinkElement, err := driver.FindElement(selenium.ByCSSSelector, ".intrinsic")
+			if err != nil {
+				log.Println("Error:", err)
+			}
+
+			ratingsElement, err := driver.FindElement(selenium.ByCSSSelector, "span.main")
+			if err != nil {
+				log.Println("Error:", err)
+			}
+
+			merchantElement, err := driver.FindElement(selenium.ByCSSSelector, ".e1qvo2ff2")
+			if err != nil {
+				log.Println("Error:", err)
+			}
+
+			name, err := nameElement.Text()
+			if err != nil {
+				log.Println("Error:", err)
+			}
+
+			price, err := priceElement.Text()
+			if err != nil {
+				log.Println("Error:", err)
+			}
+
+			description, err := descriptionElement.Text()
+			if err != nil {
+				log.Println("Error:", err)
+			}
+
+			imageLink, err := imageLinkElement.Text()
+			if err != nil {
+				log.Println("Error:", err)
+			}
+
+			ratings, err := ratingsElement.Text()
+			if err != nil {
+				log.Println("Error:", err)
+			}
+
+			merchant, err := merchantElement.Text()
+			if err != nil {
+				log.Println("Error:", err)
+			}
+
+			d := &model.Data{
+				Id:          uuid.New().String(),
+				Name:        name,
+				Price:       price,
+				Description: description,
+				ImageLink:   imageLink,
+				Ratings:     ratings,
+				MerchatName: merchant,
+			}
+			data = append(data, d)
+		}(v)
+	}
+
+	wg.Wait()
 	u.WriteCsv(data)
 }
 
