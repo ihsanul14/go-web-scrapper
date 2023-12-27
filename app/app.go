@@ -28,5 +28,4 @@ func Run() {
 	entity := entity.NewEntity(postgresEntity)
 	usecase := usecase.NewUsecase(entity, baseLogger)
 	usecase.Get()
-	// time.Sleep(5 * time.Minute)
 }

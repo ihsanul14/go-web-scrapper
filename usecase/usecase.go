@@ -25,7 +25,7 @@ type Usecase struct {
 }
 
 type Product struct {
-	name, price, link string
+	link string
 }
 type IUsecase interface {
 	Get()
@@ -39,9 +39,6 @@ func NewUsecase(entity entity.IEntity, logger *logger.Log) IUsecase {
 func (u *Usecase) Get() {
 	var wg sync.WaitGroup
 	var data []*model.Data
-	// if err := u.Entity.Insert(ctx, data); err != nil {
-	// 	u.Logger.Logger.Error(err)
-	// }
 
 	var products []Product
 	service, err := selenium.NewChromeDriverService(os.Getenv("CHROME_PATH"), 4444)
@@ -88,7 +85,7 @@ func (u *Usecase) Get() {
 	}
 
 	err = driver.WaitWithTimeout(func(driver selenium.WebDriver) (bool, error) {
-		lastProduct, _ := driver.FindElement(selenium.ByCSSSelector, ".css-10kdh43:nth-child(1)")
+		lastProduct, _ := driver.FindElement(selenium.ByCSSSelector, ".css-10kdh43:nth-child(10)")
 		if lastProduct != nil {
 			return lastProduct.IsDisplayed()
 		}
@@ -116,100 +113,103 @@ func (u *Usecase) Get() {
 		product.link = linkElementDetail
 		products = append(products, product)
 	}
+	driver.Close()
 
 	defer service.Stop()
 	fmt.Printf("total data %d \n", len(productElements))
-	for i, v := range products {
-		wg.Add(1)
-		go func(i int, v Product) {
-			defer wg.Done()
-			fmt.Println(v.link)
-			service, err := selenium.NewChromeDriverService(os.Getenv("CHROME_PATH"), 4445+i)
-			if err != nil {
-				log.Fatal("Error:", err)
-				return
-			}
+	for i := 0; i < len(products); i += 5 {
+		for j := 0; j < 5; j++ {
+			wg.Add(1)
+			go func(i int, j int) {
+				defer wg.Done()
+				fmt.Println(products[i+j].link)
 
-			defer service.Stop()
-
-			caps := selenium.Capabilities{}
-			caps.AddChrome(chrome.Capabilities{Args: []string{
-				fmt.Sprintf("--user-agent=%s", userAgent),
-			}})
-
-			driver, err := selenium.NewRemote(caps, "")
-			if err != nil {
-				log.Fatal("Error:", err)
-				return
-			}
-
-			err = driver.Get(v.link)
-			if err != nil {
-				log.Println("Error:", err)
-				return
-			}
-
-			err = driver.WaitWithTimeout(func(driver selenium.WebDriver) (bool, error) {
-				lastProduct, _ := driver.FindElement(selenium.ByCSSSelector, ".css-1os9jjn")
-				if lastProduct != nil {
-					return lastProduct.IsDisplayed()
+				driver, err := selenium.NewRemote(caps, "")
+				if err != nil {
+					log.Fatal("Error:", err)
+					return
 				}
-				return false, nil
-			}, 2*time.Second)
-			if err != nil {
-				log.Fatal("Error:", err)
-				return
-			}
 
-			name, err := extractElement(driver, ".css-1os9jjn")
-			if err != nil {
-				log.Println("Error:", err)
-				return
-			}
+				err = driver.Get(products[i+j].link)
+				if err != nil {
+					log.Println("Error:", err)
+					return
+				}
 
-			price, err := extractElement(driver, ".price")
-			if err != nil {
-				log.Println("Error:", err)
-				return
-			}
+				err = driver.WaitWithTimeout(func(driver selenium.WebDriver) (bool, error) {
+					time.Sleep(10 * time.Second)
+					lastProduct, _ := driver.FindElement(selenium.ByCSSSelector, ".css-1os9jjn")
+					if lastProduct != nil {
+						return lastProduct.IsDisplayed()
+					}
+					return false, nil
+				}, 20*time.Second)
+				if err != nil {
+					log.Fatal("Error:", err)
+					return
+				}
 
-			description, err := extractElement(driver, ".css-16inwn4")
-			if err != nil {
-				log.Println("Error:", err)
-				return
-			}
+				name, err := extractElement(driver, ".css-1os9jjn")
+				if err != nil {
+					log.Println("Error:", err)
+					return
+				}
 
-			imageLink, err := extractElement(driver, ".intrinsic")
-			if err != nil {
-				log.Println("Error:", err)
-				return
-			}
+				price, err := extractElement(driver, ".price")
+				if err != nil {
+					log.Println("Error:", err)
+					return
+				}
 
-			ratings, err := extractElement(driver, "span.main")
-			if err != nil {
-				log.Println("Error:", err)
-				return
-			}
+				description, err := extractElement(driver, ".css-16inwn4")
+				if err != nil {
+					log.Println("Error:", err)
+					return
+				}
 
-			merchant, err := extractElement(driver, ".e1qvo2ff2")
-			if err != nil {
-				log.Println("Error:", err)
-				return
-			}
+				ratings, err := extractElement(driver, "span.main")
+				if err != nil {
+					log.Println("Error:", err)
+					return
+				}
 
-			d := &model.Data{
-				Id:          uuid.New().String(),
-				Name:        *name,
-				Price:       *price,
-				Description: *description,
-				ImageLink:   *imageLink,
-				Ratings:     *ratings,
-				MerchatName: *merchant,
-			}
-			data = append(data, d)
-		}(i, v)
+				merchant, err := extractElement(driver, ".e1qvo2ff2")
+				if err != nil {
+					log.Println("Error:", err)
+					return
+				}
+
+				imageLinkElement, err := driver.FindElement(selenium.ByCSSSelector, ".css-1c345mg")
+				if err != nil {
+					log.Println("Error:", err)
+					return
+				}
+
+				imageLink, err := imageLinkElement.GetAttribute("src")
+				if err != nil {
+					log.Fatal("Error:", err)
+					return
+				}
+
+				d := &model.Data{
+					Id:          uuid.New().String(),
+					Name:        *name,
+					Price:       *price,
+					Description: *description,
+					ImageLink:   imageLink,
+					Ratings:     *ratings,
+					MerchatName: *merchant,
+				}
+				data = append(data, d)
+				defer driver.Close()
+			}(i, j)
+		}
+		time.Sleep(2 * time.Minute)
 	}
 	wg.Wait()
+	if err := u.Entity.Insert(data); err != nil {
+		u.Logger.Logger.Error(err)
+	}
 	u.WriteCsv(data)
 }
 
