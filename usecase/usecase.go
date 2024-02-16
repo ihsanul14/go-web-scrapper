@@ -8,15 +8,14 @@ import (
 	"go-web-scrapper/framework/logger"
 	"log"
 	"os"
-	"sync"
+	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/tebeka/selenium"
 	"github.com/tebeka/selenium/chrome"
 )
 
-const URL = "https://www.tokopedia.com/discovery/productlist-clp_handphone-tablet_65-120"
+const URL = "https://pemilu2024.kpu.go.id/pilpres/hitung-suara/11/1105/110507/1105072002/1105072002001"
 const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/77.0.3830.0 Safari/537.36"
 
 type Usecase struct {
@@ -37,10 +36,9 @@ func NewUsecase(entity entity.IEntity, logger *logger.Log) IUsecase {
 }
 
 func (u *Usecase) Get() {
-	var wg sync.WaitGroup
-	var data []*model.Data
+	// var wg sync.WaitGroup
+	var data []*model.Election
 
-	var products []Product
 	service, err := selenium.NewChromeDriverService(os.Getenv("CHROME_PATH"), 4444)
 	if err != nil {
 		log.Fatal("Error:", err)
@@ -57,6 +55,7 @@ func (u *Usecase) Get() {
 		log.Fatal("Error:", err)
 		return
 	}
+	defer driver.Close()
 
 	err = driver.Get(URL)
 	if err != nil {
@@ -64,28 +63,8 @@ func (u *Usecase) Get() {
 		return
 	}
 
-	scrollingScript := `
-	// scroll down the page 10 times
-	const scrolls = 10
-	let scrollCount = 0
-	
-	// scroll down and then wait for 5s
-	const scrollInterval = setInterval(() => {
-	window.scrollTo(0, document.body.scrollHeight)
-	scrollCount++
-	if (scrollCount === scrolls) {
-	clearInterval(scrollInterval)
-	}
-	}, 5000)
-	`
-	_, err = driver.ExecuteScript(scrollingScript, []interface{}{})
-	if err != nil {
-		log.Fatal("Error:", err)
-		return
-	}
-
 	err = driver.WaitWithTimeout(func(driver selenium.WebDriver) (bool, error) {
-		lastProduct, _ := driver.FindElement(selenium.ByCSSSelector, ".css-10kdh43:nth-child(10)")
+		lastProduct, _ := driver.FindElement(selenium.ByTagName, "tbody")
 		if lastProduct != nil {
 			return lastProduct.IsDisplayed()
 		}
@@ -96,121 +75,78 @@ func (u *Usecase) Get() {
 		return
 	}
 
-	productElements, err := driver.FindElements(selenium.ByCSSSelector, ".pcv3__info-content")
+	productElements, err := driver.FindElements(selenium.ByTagName, "tr")
 	if err != nil {
 		log.Fatal("Error:", err)
 		return
 	}
 
-	for _, productElement := range productElements {
-		linkElementDetail, err := productElement.GetAttribute("href")
-		if err != nil {
-			log.Fatal("Error:", err)
-			return
-		}
-
-		product := Product{}
-		product.link = linkElementDetail
-		products = append(products, product)
+	productElements = []selenium.WebElement{
+		productElements[1],
+		productElements[2],
+		productElements[3],
+		productElements[6],
+		productElements[7],
+		productElements[8],
+		productElements[10],
+		productElements[11],
+		productElements[12],
 	}
-	driver.Close()
 
 	defer service.Stop()
 	fmt.Printf("total data %d \n", len(productElements))
-	for i := 0; i < len(products); i += 5 {
-		for j := 0; j < 5; j++ {
-			wg.Add(1)
-			go func(i int, j int) {
-				defer wg.Done()
-				fmt.Println(products[i+j].link)
+	// wg.Add(1)
+	// go func(i int) {
+	// 	defer wg.Done()
 
-				driver, err := selenium.NewRemote(caps, "")
-				if err != nil {
-					log.Fatal("Error:", err)
-					return
-				}
-
-				err = driver.Get(products[i+j].link)
-				if err != nil {
-					log.Println("Error:", err)
-					return
-				}
-
-				err = driver.WaitWithTimeout(func(driver selenium.WebDriver) (bool, error) {
-					time.Sleep(10 * time.Second)
-					lastProduct, _ := driver.FindElement(selenium.ByCSSSelector, ".css-1os9jjn")
-					if lastProduct != nil {
-						return lastProduct.IsDisplayed()
-					}
-					return false, nil
-				}, 20*time.Second)
-				if err != nil {
-					log.Fatal("Error:", err)
-					return
-				}
-
-				name, err := extractElement(driver, ".css-1os9jjn")
-				if err != nil {
-					log.Println("Error:", err)
-					return
-				}
-
-				price, err := extractElement(driver, ".price")
-				if err != nil {
-					log.Println("Error:", err)
-					return
-				}
-
-				description, err := extractElement(driver, ".css-16inwn4")
-				if err != nil {
-					log.Println("Error:", err)
-					return
-				}
-
-				ratings, err := extractElement(driver, "span.main")
-				if err != nil {
-					log.Println("Error:", err)
-					return
-				}
-
-				merchant, err := extractElement(driver, ".e1qvo2ff2")
-				if err != nil {
-					log.Println("Error:", err)
-					return
-				}
-
-				imageLinkElement, err := driver.FindElement(selenium.ByCSSSelector, ".css-1c345mg")
-				if err != nil {
-					log.Println("Error:", err)
-					return
-				}
-
-				imageLink, err := imageLinkElement.GetAttribute("src")
-				if err != nil {
-					log.Fatal("Error:", err)
-					return
-				}
-
-				d := &model.Data{
-					Id:          uuid.New().String(),
-					Name:        *name,
-					Price:       *price,
-					Description: *description,
-					ImageLink:   imageLink,
-					Ratings:     *ratings,
-					MerchatName: *merchant,
-				}
-				data = append(data, d)
-				defer driver.Close()
-			}(i, j)
-		}
-		time.Sleep(2 * time.Minute)
+	t01, err := extractElementElection(productElements[3])
+	if err != nil {
+		return
 	}
-	wg.Wait()
-	if err := u.Entity.Insert(data); err != nil {
-		u.Logger.Logger.Error(err)
+
+	t02, err := extractElementElection(productElements[4])
+	if err != nil {
+		return
 	}
-	u.WriteCsv(data)
+
+	t03, err := extractElementElection(productElements[5])
+	if err != nil {
+		return
+	}
+
+	totalSah, err := extractElementElection(productElements[6])
+	if err != nil {
+		return
+	}
+
+	totalTidakSah, err := extractElementElection(productElements[7])
+	if err != nil {
+		return
+	}
+
+	total, err := extractElementElection(productElements[8])
+	if err != nil {
+		return
+	}
+
+	d := &model.Election{
+		Id:            getTpsID(URL),
+		T01:           *t01,
+		T02:           *t02,
+		T03:           *t03,
+		TotalSah:      *totalSah,
+		TotalTidakSah: *totalTidakSah,
+		Total:         *total,
+	}
+	data = append(data, d)
+	// }(i)
+	// time.Sleep(2 * time.Minute)
+	fmt.Printf("%+v", data[0])
+	// wg.Wait()
+	// if err := u.Entity.Insert(data); err != nil {
+	// 	u.Logger.Logger.Error(err)
+	// }
+	// u.WriteCsv(data)
 }
 
 func (u *Usecase) WriteCsv(data []*model.Data) {
@@ -247,4 +183,18 @@ func extractElement(v selenium.WebDriver, id string) (*string, error) {
 	}
 
 	return &res, nil
+}
+
+func extractElementElection(v selenium.WebElement) (*string, error) {
+	res, err := v.Text()
+	if err != nil {
+		return nil, err
+	}
+	resArr := strings.Split(res, " ")
+	return &resArr[len(resArr)-1], nil
+}
+
+func getTpsID(url string) string {
+	urlArr := strings.Split(url, "/")
+	return urlArr[len(urlArr)-1]
 }

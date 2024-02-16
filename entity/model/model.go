@@ -9,3 +9,13 @@ type Data struct {
 	Ratings     string `gorm:"ratings,omitempty"`
 	MerchatName string `gorm:"merchant_name,omitempty"`
 }
+
+type Election struct {
+	Id            string
+	T01           string
+	T02           string
+	T03           string
+	TotalSah      string
+	TotalTidakSah string
+	Total         string
+}
